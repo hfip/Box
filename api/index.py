@@ -23,7 +23,7 @@ SECRET_KEY_DEFAULT = base64.b64decode("NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bElRS
 
 MANIFEST = {
     "id": "org.abdullah.moviebox.addon",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "name": "MovieBox Arabic Addon",
     "description": "إضافة موفيبوكس السحابية للأفلام والمسلسلات العالمية - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
@@ -33,7 +33,8 @@ MANIFEST = {
 }
 
 def generate_device_id():
-    return ''.join(random.choices(string.hexdigests, k=32)).lower()
+    # تم تصحيح الكلمة هنا إلى hexdigits لتفادي الانهيار الداخلي 500
+    return ''.join(random.choices(string.hexdigits, k=32)).lower()
 
 DEVICE_ID = generate_device_id()
 
