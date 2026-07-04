@@ -33,7 +33,7 @@ MANIFEST = {
 }
 
 def generate_device_id():
-    return ''.join(random.choices(string.hexdigest, k=32)).lower()
+    return ''.join(random.choices(string.hexdigests, k=32)).lower()
 
 DEVICE_ID = generate_device_id()
 
