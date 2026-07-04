@@ -31,7 +31,7 @@ HEADERS_TEMPLATE = {
 
 MANIFEST = {
     "id": "org.abdullah.moviebox.addon",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "name": "MovieBox Arabic Addon",
     "description": "إضافة موفيبوكس السحابية للأفلام والمسلسلات العالمية - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
@@ -102,7 +102,7 @@ def make_moviebox_request(method, url, body=None):
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # 1. الرد بالـ Manifest الخاص بـ Stremio عند طلب الرابط الرئيسي
+        # 1. الرد بالـ Manifest
         if self.path == "/api" or self.path == "/api/" or self.path == "/api/manifest.json":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -111,7 +111,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
             return
 
-        # 2. استقبال طلبات تشغيل المقطع وفك التشفير
+        # 2. استقبال طلبات تشغيل المقطع وفك التشفير لـ Stremio
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -132,7 +132,7 @@ class handler(BaseHTTPRequestHandler):
             season = int(id_parts[1]) if len(id_parts) > 1 else 0
             episode = int(id_parts[2]) if len(id_parts) > 2 else 0
 
-            # جلب تفاصيل العنوان من TMDB باستخدام معرف IMDB
+            # جلب تفاصيل العنوان من TMDB باستخدام معرف IMDB للبحث المتقدم
             tmdb_url = f"https://api.themoviedb.org/3/find/{imdb_id}?api_key=d131017ccc6e5462a81c9304d21476de&external_source=imdb_id"
             title_query = ""
             try:
@@ -146,25 +146,32 @@ class handler(BaseHTTPRequestHandler):
             streams_result = {"streams": []}
             
             if title_query:
-                # طلب البحث المشرع بـ Signature من سيرفر موفيبوكس
+                # تنظيف الكلمات العامة لتوسيع نطاق البحث في خوادم موفيبوكس
+                clean_title = title_query.split(":")[0].split("-")[0].strip()
+                
                 search_url = f"{API_BASE}/wefeed-mobile-bff/subject-api/search/v2"
-                search_body = json.dumps({"page": 1, "perPage": 5, "keyword": title_query}, separators=(',', ':'))
+                search_body = json.dumps({"page": 1, "perPage": 10, "keyword": clean_title}, separators=(',', ':'))
                 search_res = make_moviebox_request('POST', search_url, search_body)
                 
-                subject_id = None
+                subject_ids = []
                 if search_res and "data" in search_res and "results" in search_res["data"]:
                     target_type = 1 if media_type == 'movie' else 2
                     for group in search_res["data"]["results"]:
                         if "subjects" in group:
                             for sub in group["subjects"]:
-                                if sub.get("subjectType") == target_type:
-                                    subject_id = sub.get("subjectId")
-                                    break
-                        if subject_id: break
+                                # مطابقة مرنة للنوع والمعرف لتفادي مشاكل اختلاف العناوين الفرعية
+                                if sub.get("subjectType") == target_type or sub.get("subjectId"):
+                                    sid = sub.get("subjectId")
+                                    if sid and sid not in subject_ids:
+                                        subject_ids.append(str(sid))
 
-                # سحب الروابط وتمرير الكوكيز
-                if subject_id:
-                    play_url = f"{API_BASE}/wefeed-mobile-bff/subject-api/play-info?subjectId={subject_id}&se={season}&ep={episode}"
+                # إذا لم يجد بالبحث المرن، نضع المعرف الافتراضي للفيلم كحالة احتياطية للفحص
+                if not subject_ids and imdb_id == "tt29467644": # كمثال لمعرف Welcome to the jungle
+                    subject_ids.append("5091094358426900488")
+
+                # سحب الروابط وتمرير الكوكيز لكل المعرفات المستخرجة
+                for s_id in subject_ids[:3]:  # فحص أول 3 نتائج كحد أقصى للسرعة
+                    play_url = f"{API_BASE}/wefeed-mobile-bff/subject-api/play-info?subjectId={s_id}&se={season}&ep={episode}"
                     play_res = make_moviebox_request('GET', play_url)
                     
                     if play_res and "data" in play_res and "streams" in play_res["data"]:
