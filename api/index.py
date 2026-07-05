@@ -11,9 +11,12 @@ import requests
 import re
 from urllib.parse import quote
 
+# رابط البروكسي الخاص بك على كلود فلير لتخطي حظر السيرفر السحابي
+PROXY_BASE = "https://mbox-proxy.h-fip.workers.dev/"
+
 MANIFEST = {
     "id": "org.abdullah.moviebox.addon",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "name": "MovieBox Arabic Addon",
     "description": "إضافة موفيبوكس السحابية للأفلام والمسلسلات العالمية - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
@@ -33,7 +36,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
             return
 
-        # 2. استقبال طلبات الـ Stream من Stremio وفك التشفير بالخلطة الجديدة
+        # 2. استقبال طلبات الـ Stream من Stremio وفك التشفير بالخلطة الجديدة عبر البروكسي
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -57,16 +60,13 @@ class handler(BaseHTTPRequestHandler):
             streams_result = {"streams": []}
 
             try:
-                # خطوة (أ): البحث في صفحات الويب السريعة لموفيبوكس عبر كود المحاكاة المحدث
-                search_url = f"https://moviebox.ph/web/searchResult?keyword={quote(imdb_id)}"
-                search_headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    "Referer": "https://moviebox.ph/"
-                }
+                # خطوة (أ): البحث في صفحات الويب لموفيبوكس من خلال البروكسي الخاص بك لتفادي الحظر
+                target_search_url = f"moviebox.ph/web/searchResult?keyword={quote(imdb_id)}"
+                search_url = PROXY_BASE + target_search_url
                 
-                search_resp = requests.get(search_url, headers=search_headers, timeout=15)
+                search_resp = requests.get(search_url, timeout=15)
                 
-                # استخراج بيانات الـ NUXT المحدثة الخاصة بالموقع مباشرة بدون تواقيع معقدة
+                # استخراج بيانات الـ NUXT المحدثة الخاصة بالموقع مباشرة
                 match = re.search(r'<script[^>]+id="__NUXT_DATA__"[^>]*>(.*?)</script>', search_resp.text, re.DOTALL)
                 
                 if match:
@@ -74,35 +74,24 @@ class handler(BaseHTTPRequestHandler):
                     subject_id = None
                     detail_path = None
                     
-                    # الفحص الذكي لاستخراج المعرف والـ Slug للمادة من مصفوفة الويب
+                    # الفحص الذكي لاستخراج المعرف والـ Slug للمادة
                     for item in nuxt_data:
                         if isinstance(item, dict) and "subjectId" in item and "detailPath" in item:
                             subject_id = item.get("subjectId")
                             detail_path = item.get("detailPath")
                             break
                     
-                    # خطوة (ب): إذا عثرنا على معرف المادة، نقوم بسحب الروابط فوراً عبر ممر الـ H5 المفتوح
+                    # خطوة (ب): إذا عثرنا على معرف المادة، نقوم بسحب الروابط فوراً عبر ممر الـ H5 المفتوح من خلال البروكسي
                     if subject_id and detail_path:
-                        # تجربة الخوادم التناوبية والمستقرة كما يفعل المطور تماماً
-                        domains = ["https://h5-api.aoneroom.com", "https://moviebox.ph"]
+                        domains = ["h5-api.aoneroom.com", "moviebox.ph"]
                         streams_found = []
                         
                         for domain in domains:
-                            play_url = f"{domain}/wefeed-h5api-bff/subject/play?subjectId={subject_id}&se={season}&ep={episode}&detailPath={quote(detail_path)}"
-                            play_headers = {
-                                'accept': 'application/json',
-                                'referer': f'{domain}/spa/videoPlayPage/movies/{detail_path}?id={subject_id}',
-                                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-                                'x-client-info': '{"timezone":"Asia/Calcutta"}',
-                                'sec-fetch-dest': 'empty',
-                                'sec-fetch-mode': 'cors',
-                                'sec-fetch-site': 'same-origin'
-                            }
-                            
-                            cookies = {"uuid": "d8c3539e-2e46-4000-af20-7046a856e30a"}
+                            target_play_url = f"{domain}/wefeed-h5api-bff/subject/play?subjectId={subject_id}&se={season}&ep={episode}&detailPath={quote(detail_path)}"
+                            play_url = PROXY_BASE + target_play_url
                             
                             try:
-                                play_resp = requests.get(play_url, headers=play_headers, cookies=cookies, timeout=12).json()
+                                play_resp = requests.get(play_url, timeout=12).json()
                                 play_data = play_resp.get("data", {}) or {}
                                 if "streams" in play_data and play_data["streams"]:
                                     streams_found = play_data["streams"]
@@ -110,7 +99,7 @@ class handler(BaseHTTPRequestHandler):
                             except:
                                 continue
                         
-                        # خطوة (ج): تنسيق الروابط وعرضها في واجهة Stremio
+                        # line (ج): تنسيق الروابط وعرضها في واجهة Stremio
                         for s in streams_found:
                             stream_url = s.get("url")
                             if stream_url:
@@ -119,7 +108,7 @@ class handler(BaseHTTPRequestHandler):
                                 
                                 streams_result["streams"].append({
                                     "name": f"🍿 MovieBox | {quality_label}",
-                                    "title": f"🎬 البث السحابي الذكي المفتوح\n🚀 الجودة المستقرة: {quality_label}\n✨ تطوير عبدالله @Abdullu.X",
+                                    "title": f"🎬 البث السحابي الذكي المفتوح (عبر البروكسي)\n🚀 الجودة المستقرة: {quality_label}\n✨ تطوير عبدالله @Abdullu.X",
                                     "url": stream_url,
                                     "behaviorHints": {
                                         "proxyHeaders": {
@@ -132,7 +121,7 @@ class handler(BaseHTTPRequestHandler):
                                 })
                                 
             except Exception as e:
-                print(f"Cloud Scrape Error: {e}")
+                print(f"Proxy Cloud Scrape Error: {e}")
 
             # تسليم قائمة الروابط الصافية إلى تطبيق المشغل
             self.send_response(200)
