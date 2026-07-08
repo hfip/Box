@@ -13,7 +13,7 @@ from urllib.parse import quote
 # البروكسي الخاص بك على كلود فلير لتأمين الاتصال وتفادي حظر السيرفرات السحابية
 PROXY_BASE = "https://mbox-proxy.h-fip.workers.dev/"
 
-# الروابط والممرات الخلفية السرية لشبكة H5
+# الروابط والممرات الخلفية السرية لشبكة H5 المحدثة كلياً
 CATALOG_URL = PROXY_BASE + "h5-api.aoneroom.com/wefeed-h5api-bff/home?host=moviebox.ph"
 PLAY_BASE_URL = PROXY_BASE + "h5-api.aoneroom.com/wefeed-h5api-bff/subject/play"
 
@@ -26,16 +26,16 @@ H5_HEADERS = {
     "Accept": "application/json"
 }
 
-# تعريف الإضافة مع تفعيل ممرات الكتالوج (Catalogs) للتصفح المباشر
+# تعريف الإضافة مع الكتالوجات المتطابقة مع الـ JSON الحقيقي للموقع
 MANIFEST = {
     "id": "org.abdullah.moviebox.catalogs",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "name": "MovieBox Arabic Catalogs",
     "description": "إضافة موفيبوكس السحابية للأقسام والبث المباشر المفتوح - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
     "resources": ["catalog", "stream"],
     "types": ["movie", "series"],
-    "idPrefixes": ["mb"],  # بادئة خاصة بالمعرفات الداخلية لموفيبوكس لتجنب تعارض البحث
+    "idPrefixes": ["mb"],
     "catalogs": [
         {
             "id": "mb_movies_trending",
@@ -61,50 +61,49 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
             return
 
-        # 2. ممر جلب الأقسام وعرضها في واجهة Stremio (Catalog Handler)
+        # 2. ممر جلب الأقسام واستخراج البوسترات (Catalog Handler المحدث بناءً على الـ داتا)
         if "/api/catalog/" in self.path:
             clean_path = self.path.replace("/api/catalog/", "").replace(".json", "")
             parts = clean_path.split("/")
             
-            # تحديد نوع القسم المطلوب (أفلام أم مسلسلات)
             catalog_type = parts[0] if len(parts) > 0 else "movie"
-            catalog_id = parts[1] if len(parts) > 1 else ""
             
             metas = []
             
             try:
                 # جلب الـ JSON الصافي للأقسام مباشرة من الممر الخلفي
                 resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=10).json()
-                cards = resp.get("data", {}).get("cards", [])
+                operating_list = resp.get("data", {}).get("operatingList", [])
                 
-                for card in cards:
-                    # تصفية المحتوى بناءً على النوع (أفلام أو مسلسلات تريند)
-                    card_title = str(card.get("title", "")).lower()
-                    items = card.get("content", {}).get("items", [])
+                for section in operating_list:
+                    title = str(section.get("title", "")).lower()
+                    subjects = section.get("subjects", [])
                     
-                    # التحقق من مطابقة القسم للطلب الحالي
-                    is_movie_req = (catalog_type == "movie" and "movie" in card_title)
-                    is_series_req = (catalog_type == "series" and ("tv" in card_title or "series" in card_title))
+                    # التحقق من مطابقة القسم المطلوب (أفلام تريند أو مسلسلات تريند)
+                    is_movie_section = (catalog_type == "movie" and "movie" in title)
+                    is_series_section = (catalog_type == "series" and ("tv" in title or "drama" in title or "anime" in title))
                     
-                    if is_movie_req or is_series_req or not catalog_id:
-                        for item in items:
-                            subject_id = item.get("subjectId")
-                            title = item.get("title")
-                            cover = item.get("cover")
-                            detail_path = item.get("detailPath", "")
+                    if is_movie_section or is_series_section:
+                        for sub in subjects:
+                            subject_id = sub.get("subjectId")
+                            movie_title = sub.get("title")
+                            detail_path = sub.get("detailPath", "")
                             
-                            if subject_id and title:
-                                # صياغة المعرف الداخلي الذكي ليمرر الـ subjectId والـ detailPath معاً
+                            # استخراج البوستر من حقل cover المتوفر في الـ JSON الجديد
+                            cover_data = sub.get("cover", {}) or {}
+                            poster_url = cover_data.get("url", "")
+                            
+                            if subject_id and movie_title:
                                 combined_id = f"mb:{subject_id}:{quote(detail_path)}"
                                 metas.append({
                                     "id": combined_id,
                                     "type": catalog_type,
-                                    "name": title,
-                                    "poster": cover,
-                                    "description": f"فيلم/مسلسل حصري متوفر على شبكة MovieBox للهندسة العكسية. معرف المادة: {subject_id}"
+                                    "name": movie_title,
+                                    "poster": poster_url,
+                                    "description": f"🍿 فيلم/مسلسل متوفر عبر شبكة موفيبوكس السحابية. تقييم الـ IMDB: {sub.get('imdbRatingValue', 'N/A')}"
                                 })
             except Exception as e:
-                print(f"Catalog fetch error: {e}")
+                print(f"Catalog dynamic parse error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -118,21 +117,15 @@ class handler(BaseHTTPRequestHandler):
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
             
-            if len(parts) >= 2:
-                media_type = parts[0]
-                combined_id = parts[1]
-            else:
-                combined_id = ""
-
+            combined_id = parts[1] if len(parts) >= 2 else ""
             streams_result = {"streams": []}
 
-            # معالجة المعرفات القادمة من الأقسام المخصصة للإضافة (mb)
             if combined_id.startswith("mb:"):
                 id_parts = combined_id.split(":")
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 detail_path = id_parts[2] if len(id_parts) > 2 else ""
                 
-                # إعداد بارامترات ممر الـ Play السري
+                # بناء رابط الـ Play مع الهيدرز لمحاكاة التطبيق تماماً
                 play_url = f"{PLAY_BASE_URL}?subjectId={subject_id}&se=0&ep=0&detailPath={detail_path}"
                 
                 try:
@@ -148,7 +141,7 @@ class handler(BaseHTTPRequestHandler):
                             
                             streams_result["streams"].append({
                                 "name": f"🍿 MovieBox | {quality_label}",
-                                "title": f"🎬 البث الذكي المباشر من ممر الأقسام\n🚀 دقة العرض المستقرة: {quality_label}\n✨ تطوير عبدالله @Abdullu.X",
+                                "title": f"🎬 بث مباشر مستقر عبر ممر الأقسام الذكي\n✨ تطوير عبدالله @Abdullu.X",
                                 "url": stream_url,
                                 "behaviorHints": {
                                     "proxyHeaders": {
@@ -160,7 +153,7 @@ class handler(BaseHTTPRequestHandler):
                                 }
                             })
                 except Exception as e:
-                    print(f"Stream generation error: {e}")
+                    print(f"Stream dynamic fetch error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
