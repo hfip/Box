@@ -10,26 +10,23 @@ import json
 import requests
 from urllib.parse import quote
 
-# البروكسي الخاص بك على كلود فلير لتأمين الاتصال وتفادي حظر السيرفرات السحابية
-PROXY_BASE = "https://mbox-proxy.h-fip.workers.dev/"
+# الممرات الرسمية والخلفية المباشرة والمكشوفة لشبكة H5
+CATALOG_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/home?host=moviebox.ph"
+PLAY_BASE_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/play"
 
-# الروابط والممرات الخلفية السرية لشبكة H5 المحدثة كلياً
-CATALOG_URL = PROXY_BASE + "h5-api.aoneroom.com/wefeed-h5api-bff/home?host=moviebox.ph"
-PLAY_BASE_URL = PROXY_BASE + "h5-api.aoneroom.com/wefeed-h5api-bff/subject/play"
-
-# توليفة الهيدرز الذهبية لمحاكاة التطبيق الرسمي كلياً
+# توليفة الهيدرز الرسمية المعتمدة في الـ Pyto لتخطي أي حظر عميل
 H5_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
     "Referer": "https://moviebox.ph/",
     "Origin": "https://moviebox.ph",
     "X-Client-Type": "h5",
     "Accept": "application/json"
 }
 
-# تعريف الإضافة مع الكتالوجات المتطابقة مع الـ JSON الحقيقي للموقع
+# مصفوفة التعريف للـ Manifest مع التصنيفات المطابقة لـ داتا السيرفر الحية
 MANIFEST = {
     "id": "org.abdullah.moviebox.catalogs",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "name": "MovieBox Arabic Catalogs",
     "description": "إضافة موفيبوكس السحابية للأقسام والبث المباشر المفتوح - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
@@ -38,14 +35,14 @@ MANIFEST = {
     "idPrefixes": ["mb"],
     "catalogs": [
         {
-            "id": "mb_movies_trending",
+            "id": "mb_movies_popular",
             "type": "movie",
-            "name": "🎬 MovieBox | أفلام تريند"
+            "name": "🎬 MovieBox | أفلام شائعة"
         },
         {
-            "id": "mb_series_trending",
+            "id": "mb_series_popular",
             "type": "series",
-            "name": "📺 MovieBox | مسلسلات تريند"
+            "name": "📺 MovieBox | مسلسلات شائعة"
         }
     ]
 }
@@ -61,17 +58,16 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
             return
 
-        # 2. ممر جلب الأقسام واستخراج البوسترات (Catalog Handler المحدث بناءً على الـ داتا)
+        # 2. ممر جلب الأقسام واستخراج البوسترات (Catalog Handler)
         if "/api/catalog/" in self.path:
             clean_path = self.path.replace("/api/catalog/", "").replace(".json", "")
             parts = clean_path.split("/")
             
             catalog_type = parts[0] if len(parts) > 0 else "movie"
-            
             metas = []
             
             try:
-                # جلب الـ JSON الصافي للأقسام مباشرة من الممر الخلفي
+                # طلب قائمة التصنيفات مباشرة ومطابقتها مع اختبار الجوال الموثوق
                 resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=10).json()
                 operating_list = resp.get("data", {}).get("operatingList", [])
                 
@@ -79,9 +75,9 @@ class handler(BaseHTTPRequestHandler):
                     title = str(section.get("title", "")).lower()
                     subjects = section.get("subjects", [])
                     
-                    # التحقق من مطابقة القسم المطلوب (أفلام تريند أو مسلسلات تريند)
-                    is_movie_section = (catalog_type == "movie" and "movie" in title)
-                    is_series_section = (catalog_type == "series" and ("tv" in title or "drama" in title or "anime" in title))
+                    # الفرز الذكي والمطابق لأسماء خوادم الكتالوج
+                    is_movie_section = (catalog_type == "movie" and "popular movie" in title)
+                    is_series_section = (catalog_type == "series" and "popular series" in title)
                     
                     if is_movie_section or is_series_section:
                         for sub in subjects:
@@ -89,7 +85,7 @@ class handler(BaseHTTPRequestHandler):
                             movie_title = sub.get("title")
                             detail_path = sub.get("detailPath", "")
                             
-                            # استخراج البوستر من حقل cover المتوفر في الـ JSON الجديد
+                            # استخراج غلاف البوستر الصافي بدقة
                             cover_data = sub.get("cover", {}) or {}
                             poster_url = cover_data.get("url", "")
                             
@@ -100,10 +96,10 @@ class handler(BaseHTTPRequestHandler):
                                     "type": catalog_type,
                                     "name": movie_title,
                                     "poster": poster_url,
-                                    "description": f"🍿 فيلم/مسلسل متوفر عبر شبكة موفيبوكس السحابية. تقييم الـ IMDB: {sub.get('imdbRatingValue', 'N/A')}"
+                                    "description": f"🍿 مادة ميديا حصرية متوفرة عبر إضافة موفيبوكس. التقييم: {sub.get('imdbRatingValue', 'N/A')}"
                                 })
             except Exception as e:
-                print(f"Catalog dynamic parse error: {e}")
+                print(f"Server Catalog Process Error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -125,7 +121,7 @@ class handler(BaseHTTPRequestHandler):
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 detail_path = id_parts[2] if len(id_parts) > 2 else ""
                 
-                # بناء رابط الـ Play مع الهيدرز لمحاكاة التطبيق تماماً
+                # توجيه طلب التشغيل مباشرة بالهيدرز الكاملة
                 play_url = f"{PLAY_BASE_URL}?subjectId={subject_id}&se=0&ep=0&detailPath={detail_path}"
                 
                 try:
@@ -141,7 +137,7 @@ class handler(BaseHTTPRequestHandler):
                             
                             streams_result["streams"].append({
                                 "name": f"🍿 MovieBox | {quality_label}",
-                                "title": f"🎬 بث مباشر مستقر عبر ممر الأقسام الذكي\n✨ تطوير عبدالله @Abdullu.X",
+                                "title": f"🎬 تشغيل فوري مباشر ومستقر من الكتالوج\n✨ تطوير عبدالله @Abdullu.X",
                                 "url": stream_url,
                                 "behaviorHints": {
                                     "proxyHeaders": {
@@ -153,7 +149,7 @@ class handler(BaseHTTPRequestHandler):
                                 }
                             })
                 except Exception as e:
-                    print(f"Stream dynamic fetch error: {e}")
+                    print(f"Server Stream Process Error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
