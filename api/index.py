@@ -1,5 +1,5 @@
 """
-MovieBox Arabic Catalog, Meta & Stream Addon for Stremio
+MovieBox Arabic All-In-One Dynamic Addon for Stremio
 Developed by: Abdullah
 Telegram: @Abdullu.X
 Year: 2026
@@ -10,7 +10,7 @@ import json
 import requests
 from urllib.parse import quote, unquote
 
-# الممرات الرسمية والمباشرة لشبكة H5
+# الممرات الخلفية الرسمية والمباشرة لشبكة H5 (الاتصال المباشر الموثوق من اختبار الجوال)
 CATALOG_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/home?host=moviebox.ph"
 PLAY_BASE_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/play"
 
@@ -22,36 +22,65 @@ H5_HEADERS = {
     "Accept": "application/json"
 }
 
-# الـ Manifest المحدث مع الأقسام الموسعة (أفلام، مسلسلات، أنمي، هوليوود)
+# صياغة الـ Manifest الأساسي للإضافة
 MANIFEST = {
-    "id": "org.abdullah.moviebox.catalogs",
-    "version": "3.0.0",
-    "name": "MovieBox Arabic Full Addon",
-    "description": "إضافة موفيبوكس المتكاملة للأقسام، البيانات الوصفية، والبث المباشر - تطوير عبدالله @Abdullu.X",
+    "id": "org.abdullah.moviebox.dynamic",
+    "version": "4.0.0",
+    "name": "MovieBox Arabic Dynamic Addon",
+    "description": "إضافة موفيبوكس الديناميكية الشاملة لجميع الأقسام والروابط المباشرة - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
-    "resources": ["catalog", "meta", "stream"], # تفعيل الـ meta لحل مشكلة البيانات الوصفية
-    "types": ["movie", "series", "anime"],
+    "resources": ["catalog", "meta", "stream"],
+    "types": ["movie", "series"],
     "idPrefixes": ["mb"],
-    "catalogs": [
-        {"id": "mb_movies_popular", "type": "movie", "name": "🎬 MovieBox | أفلام شائعة"},
-        {"id": "mb_hollywood", "type": "movie", "name": "🎥 MovieBox | سينما هوليوود"},
-        {"id": "mb_series_popular", "type": "series", "name": "📺 MovieBox | مسلسلات شائعة"},
-        {"id": "mb_anime", "type": "series", "name": "🔥 MovieBox | أنمي ياباني شائك"}
-    ]
+    "catalogs": [] # يتم ملؤه ديناميكياً في خطوة الـ Manifest لتجنب كتابة الأقسام يدوياً
 }
+
+# دالة مساعدة لجلب الأقسام حية من السيرفر وبناء قائمة الكتالوجات ديناميكياً
+def get_dynamic_catalogs():
+    catalogs = []
+    try:
+        resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=5).json()
+        operating_list = resp.get("data", {}).get("operatingList", [])
+        
+        for index, section in enumerate(operating_list):
+            title = section.get("title")
+            subjects = section.get("subjects", [])
+            
+            # ننشئ كتالوج فقط إذا كان القسم يحتوي على مواد حقيقية لمنع الواجهات الفارغة
+            if title and subjects:
+                # توليد معرف فرعي آمن للقسم يعتمد على الترتيب والعنوان
+                safe_id = f"mb_cat_{index}"
+                catalogs.append({
+                    "id": safe_id,
+                    "type": "movie" if "movie" in title.lower() else "series",
+                    "name": f"🍿 {title}"
+                })
+    except Exception as e:
+        print(f"Error generating dynamic manifests: {e}")
+    
+    # إذا فشل الجلب لأي سبب، نضع كتالوجات احتياطية لضمان عدم انهيار الإضافة
+    if not catalogs:
+        catalogs = [
+            {"id": "mb_movies_fallback", "type": "movie", "name": "🎬 MovieBox | Movies"},
+            {"id": "mb_series_fallback", "type": "series", "name": "📺 MovieBox | Series"}
+        ]
+    return catalogs
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # 1. الرد بالـ Manifest لتثبيت الإضافة
+        # 1. ممر الـ Manifest (يولد الأقسام ديناميكياً عند تثبيت أو قراءة الإضافة)
         if self.path in ["/api", "/api/", "/api/manifest.json"]:
+            dynamic_manifest = MANIFEST.copy()
+            dynamic_manifest["catalogs"] = get_dynamic_catalogs()
+            
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
+            self.wfile.write(json.dumps(dynamic_manifest).encode("utf-8"))
             return
 
-        # 2. ممر جلب وتصفية الأقسام المتعددة (Catalog Handler)
+        # 2. ممر جلب داتا الأقسام والبوسترات بشكل ديناميكي (Catalog Handler)
         if "/api/catalog/" in self.path:
             clean_path = self.path.replace("/api/catalog/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -61,21 +90,23 @@ class handler(BaseHTTPRequestHandler):
             metas = []
             
             try:
+                # جلب الـ JSON الأصلي من السيرفر
                 resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=10).json()
                 operating_list = resp.get("data", {}).get("operatingList", [])
                 
-                for section in operating_list:
-                    title = str(section.get("title", "")).lower()
-                    subjects = section.get("subjects", [])
-                    
-                    # مطابقة الفرز بناءً على القسم المختار من القائمة الموسعة
-                    is_match = False
-                    if catalog_id == "mb_movies_popular" and "popular movie" in title: is_match = True
-                    elif catalog_id == "mb_hollywood" and "hollywood movie" in title: is_match = True
-                    elif catalog_id == "mb_series_popular" and "popular series" in title: is_match = True
-                    elif catalog_id == "mb_anime" and "popular anime" in title: is_match = True
-                    
-                    if is_match:
+                # استخراج رقم الفهرس (Index) من معرف الكتالوج المطلوب
+                target_index = None
+                if "mb_cat_" in catalog_id:
+                    try:
+                        target_index = int(catalog_id.replace("mb_cat_", ""))
+                    except:
+                        target_index = None
+                
+                # جلب القسم المطابق للطلب وعرض محتوياته فوراً
+                for index, section in enumerate(operating_list):
+                    # التحقق: إما يطابق الفهرس المستخرج، أو يطابق النوع كإجراء احتياطي
+                    if target_index == index or (target_index is None and catalog_type in str(section.get("title", "")).lower()):
+                        subjects = section.get("subjects", [])
                         for sub in subjects:
                             subject_id = sub.get("subjectId")
                             movie_title = sub.get("title")
@@ -88,13 +119,14 @@ class handler(BaseHTTPRequestHandler):
                                 combined_id = f"mb:{subject_id}:{quote(detail_path)}"
                                 metas.append({
                                     "id": combined_id,
-                                    "type": catalog_type if catalog_type != "anime" else "series",
+                                    "type": catalog_type,
                                     "name": movie_title,
                                     "poster": poster_url,
-                                    "description": f"🍿 مادة ميديا متوفرة عبر شبكة موفيبوكس الحية. تقييم الـ IMDB: {sub.get('imdbRatingValue', 'N/A')}"
+                                    "description": f"🌟 فيلم/مسلسل متوفر ضمن قسم {section.get('title')}. التقييم العالمي: {sub.get('imdbRatingValue', 'N/A')}"
                                 })
+                        break # خرج بعد العثور على القسم لضمان سرعة الاستجابة
             except Exception as e:
-                print(f"Catalog Error: {e}")
+                print(f"Server Catalog Process Error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -103,7 +135,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"metas": metas}).encode("utf-8"))
             return
 
-        # 3. ممر حل البيانات الوصفية (Meta Handler) - لمنع رسالة لا توجد بيانات وصفية
+        # 3. ممر معالجة البيانات الوصفية الفورية (Meta Handler) - لحل مشكلة الفراغ
         if "/api/meta/" in self.path:
             clean_path = self.path.replace("/api/meta/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -118,12 +150,14 @@ class handler(BaseHTTPRequestHandler):
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 detail_path = unquote(id_parts[2]) if len(id_parts) > 2 else ""
                 
-                # إرجاع بيانات وصفية افتراضية فورية لـ Stremio ليفتح صفحة الفيلم ويطلب الـ Streams
+                # صياغة عنوان افتراضي نظيف مستخرج من مسار الفيلم للـ Stremio
+                clean_name = detail_path.replace("-", " ").title() if detail_path else "MovieBox Media"
+                
                 meta_result["meta"] = {
                     "id": combined_id,
                     "type": media_type,
-                    "name": detail_path.replace("-", " ").title() if detail_path else "MovieBox Media",
-                    "description": f"✨ تم معالجة البيانات الوصفية بنجاح للمعرف الداخلي: {subject_id}. الروابط جاهزة بالأسفل تلقائياً."
+                    "name": clean_name,
+                    "description": f"🎬 معرف المادة الداخلي: {subject_id}\n✨ تم توليد البيانات الوصفية وحل مشكلة العرض بنجاح. روابط البث جاهزة ومستقرة بالأسفل!"
                 }
 
             self.send_response(200)
@@ -133,7 +167,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(meta_result).encode("utf-8"))
             return
 
-        # 4. ممر جلب روابط البث المباشر (Stream Handler)
+        # 4. ممر جلب روابط البث وتشغيل الميديا مباشرة (Stream Handler)
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -161,7 +195,7 @@ class handler(BaseHTTPRequestHandler):
                             
                             streams_result["streams"].append({
                                 "name": f"🍿 MovieBox | {quality_label}",
-                                "title": f"🎬 تشغيل مباشر مستقر عبر ممر الكتالوج الذكي\n✨ تطوير عبدالله @Abdullu.X",
+                                "title": f"🎬 تشغيل فوري مستقر ومباشر من ممر الأقسام\n✨ تطوير عبدالله @Abdullu.X",
                                 "url": stream_url,
                                 "behaviorHints": {
                                     "proxyHeaders": {
