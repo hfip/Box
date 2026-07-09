@@ -1,5 +1,5 @@
 """
-MovieBox Arabic Catalog & Stream Addon for Stremio
+MovieBox Arabic Catalog, Meta & Stream Addon for Stremio
 Developed by: Abdullah
 Telegram: @Abdullu.X
 Year: 2026
@@ -8,13 +8,12 @@ Year: 2026
 from http.server import BaseHTTPRequestHandler
 import json
 import requests
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
-# الممرات الرسمية والخلفية المباشرة والمكشوفة لشبكة H5
+# الممرات الرسمية والمباشرة لشبكة H5
 CATALOG_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/home?host=moviebox.ph"
 PLAY_BASE_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/play"
 
-# توليفة الهيدرز الرسمية المعتمدة في الـ Pyto لتخطي أي حظر عميل
 H5_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
     "Referer": "https://moviebox.ph/",
@@ -23,27 +22,21 @@ H5_HEADERS = {
     "Accept": "application/json"
 }
 
-# مصفوفة التعريف للـ Manifest مع التصنيفات المطابقة لـ داتا السيرفر الحية
+# الـ Manifest المحدث مع الأقسام الموسعة (أفلام، مسلسلات، أنمي، هوليوود)
 MANIFEST = {
     "id": "org.abdullah.moviebox.catalogs",
-    "version": "2.2.0",
-    "name": "MovieBox Arabic Catalogs",
-    "description": "إضافة موفيبوكس السحابية للأقسام والبث المباشر المفتوح - تطوير عبدالله @Abdullu.X",
+    "version": "3.0.0",
+    "name": "MovieBox Arabic Full Addon",
+    "description": "إضافة موفيبوكس المتكاملة للأقسام، البيانات الوصفية، والبث المباشر - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
-    "resources": ["catalog", "stream"],
-    "types": ["movie", "series"],
+    "resources": ["catalog", "meta", "stream"], # تفعيل الـ meta لحل مشكلة البيانات الوصفية
+    "types": ["movie", "series", "anime"],
     "idPrefixes": ["mb"],
     "catalogs": [
-        {
-            "id": "mb_movies_popular",
-            "type": "movie",
-            "name": "🎬 MovieBox | أفلام شائعة"
-        },
-        {
-            "id": "mb_series_popular",
-            "type": "series",
-            "name": "📺 MovieBox | مسلسلات شائعة"
-        }
+        {"id": "mb_movies_popular", "type": "movie", "name": "🎬 MovieBox | أفلام شائعة"},
+        {"id": "mb_hollywood", "type": "movie", "name": "🎥 MovieBox | سينما هوليوود"},
+        {"id": "mb_series_popular", "type": "series", "name": "📺 MovieBox | مسلسلات شائعة"},
+        {"id": "mb_anime", "type": "series", "name": "🔥 MovieBox | أنمي ياباني شائك"}
     ]
 }
 
@@ -58,16 +51,16 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
             return
 
-        # 2. ممر جلب الأقسام واستخراج البوسترات (Catalog Handler)
+        # 2. ممر جلب وتصفية الأقسام المتعددة (Catalog Handler)
         if "/api/catalog/" in self.path:
             clean_path = self.path.replace("/api/catalog/", "").replace(".json", "")
             parts = clean_path.split("/")
             
             catalog_type = parts[0] if len(parts) > 0 else "movie"
+            catalog_id = parts[1] if len(parts) > 1 else ""
             metas = []
             
             try:
-                # طلب قائمة التصنيفات مباشرة ومطابقتها مع اختبار الجوال الموثوق
                 resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=10).json()
                 operating_list = resp.get("data", {}).get("operatingList", [])
                 
@@ -75,17 +68,19 @@ class handler(BaseHTTPRequestHandler):
                     title = str(section.get("title", "")).lower()
                     subjects = section.get("subjects", [])
                     
-                    # الفرز الذكي والمطابق لأسماء خوادم الكتالوج
-                    is_movie_section = (catalog_type == "movie" and "popular movie" in title)
-                    is_series_section = (catalog_type == "series" and "popular series" in title)
+                    # مطابقة الفرز بناءً على القسم المختار من القائمة الموسعة
+                    is_match = False
+                    if catalog_id == "mb_movies_popular" and "popular movie" in title: is_match = True
+                    elif catalog_id == "mb_hollywood" and "hollywood movie" in title: is_match = True
+                    elif catalog_id == "mb_series_popular" and "popular series" in title: is_match = True
+                    elif catalog_id == "mb_anime" and "popular anime" in title: is_match = True
                     
-                    if is_movie_section or is_series_section:
+                    if is_match:
                         for sub in subjects:
                             subject_id = sub.get("subjectId")
                             movie_title = sub.get("title")
                             detail_path = sub.get("detailPath", "")
                             
-                            # استخراج غلاف البوستر الصافي بدقة
                             cover_data = sub.get("cover", {}) or {}
                             poster_url = cover_data.get("url", "")
                             
@@ -93,13 +88,13 @@ class handler(BaseHTTPRequestHandler):
                                 combined_id = f"mb:{subject_id}:{quote(detail_path)}"
                                 metas.append({
                                     "id": combined_id,
-                                    "type": catalog_type,
+                                    "type": catalog_type if catalog_type != "anime" else "series",
                                     "name": movie_title,
                                     "poster": poster_url,
-                                    "description": f"🍿 مادة ميديا حصرية متوفرة عبر إضافة موفيبوكس. التقييم: {sub.get('imdbRatingValue', 'N/A')}"
+                                    "description": f"🍿 مادة ميديا متوفرة عبر شبكة موفيبوكس الحية. تقييم الـ IMDB: {sub.get('imdbRatingValue', 'N/A')}"
                                 })
             except Exception as e:
-                print(f"Server Catalog Process Error: {e}")
+                print(f"Catalog Error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -108,7 +103,37 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"metas": metas}).encode("utf-8"))
             return
 
-        # 3. ممر جلب روابط البث المباشر وتشغيل المادة فوراً (Stream Handler)
+        # 3. ممر حل البيانات الوصفية (Meta Handler) - لمنع رسالة لا توجد بيانات وصفية
+        if "/api/meta/" in self.path:
+            clean_path = self.path.replace("/api/meta/", "").replace(".json", "")
+            parts = clean_path.split("/")
+            
+            media_type = parts[0] if len(parts) > 0 else "movie"
+            combined_id = parts[1] if len(parts) > 1 else ""
+            
+            meta_result = {"meta": {}}
+            
+            if combined_id.startswith("mb:"):
+                id_parts = combined_id.split(":")
+                subject_id = id_parts[1] if len(id_parts) > 1 else ""
+                detail_path = unquote(id_parts[2]) if len(id_parts) > 2 else ""
+                
+                # إرجاع بيانات وصفية افتراضية فورية لـ Stremio ليفتح صفحة الفيلم ويطلب الـ Streams
+                meta_result["meta"] = {
+                    "id": combined_id,
+                    "type": media_type,
+                    "name": detail_path.replace("-", " ").title() if detail_path else "MovieBox Media",
+                    "description": f"✨ تم معالجة البيانات الوصفية بنجاح للمعرف الداخلي: {subject_id}. الروابط جاهزة بالأسفل تلقائياً."
+                }
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(meta_result).encode("utf-8"))
+            return
+
+        # 4. ممر جلب روابط البث المباشر (Stream Handler)
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -121,7 +146,6 @@ class handler(BaseHTTPRequestHandler):
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 detail_path = id_parts[2] if len(id_parts) > 2 else ""
                 
-                # توجيه طلب التشغيل مباشرة بالهيدرز الكاملة
                 play_url = f"{PLAY_BASE_URL}?subjectId={subject_id}&se=0&ep=0&detailPath={detail_path}"
                 
                 try:
@@ -137,7 +161,7 @@ class handler(BaseHTTPRequestHandler):
                             
                             streams_result["streams"].append({
                                 "name": f"🍿 MovieBox | {quality_label}",
-                                "title": f"🎬 تشغيل فوري مباشر ومستقر من الكتالوج\n✨ تطوير عبدالله @Abdullu.X",
+                                "title": f"🎬 تشغيل مباشر مستقر عبر ممر الكتالوج الذكي\n✨ تطوير عبدالله @Abdullu.X",
                                 "url": stream_url,
                                 "behaviorHints": {
                                     "proxyHeaders": {
@@ -149,7 +173,7 @@ class handler(BaseHTTPRequestHandler):
                                 }
                             })
                 except Exception as e:
-                    print(f"Server Stream Process Error: {e}")
+                    print(f"Stream Fetch Error: {e}")
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
