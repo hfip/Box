@@ -23,7 +23,7 @@ H5_HEADERS = {
     "Origin": "https://moviebox.ph",
     "X-Client-Type": "h5",
     "Accept": "application/json",
-    "Authorization": f"Bearer {AUTH_TOKEN}"  # تم حقن التوكن لإتاحة الوصول للروابط الحية السريعة
+    "Authorization": f"Bearer {AUTH_TOKEN}"
 }
 
 # صياغة الـ Manifest الأساسي للإضافة
@@ -36,23 +36,18 @@ MANIFEST = {
     "resources": ["catalog", "meta", "stream"],
     "types": ["movie", "series"],
     "idPrefixes": ["mb"],
-    "catalogs": [] # يتم ملؤه ديناميكياً في خطوة الـ Manifest لتجنب كتابة الأقسام يدوياً
+    "catalogs": []
 }
 
-# دالة مساعدة لجلب الأقسام حية من السيرفر وبناء قائمة الكتالوجات ديناميكياً
 def get_dynamic_catalogs():
     catalogs = []
     try:
         resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=5).json()
         operating_list = resp.get("data", {}).get("operatingList", [])
-        
         for index, section in enumerate(operating_list):
             title = section.get("title")
             subjects = section.get("subjects", [])
-            
-            # ننشئ كتالوج فقط إذا كان القسم يحتوي على مواد حقيقية لمنع الواجهات الفارغة
             if title and subjects:
-                # توليد معرف فرعي آمن للقسم يعتمد على الترتيب والعنوان
                 safe_id = f"mb_cat_{index}"
                 catalogs.append({
                     "id": safe_id,
@@ -61,8 +56,6 @@ def get_dynamic_catalogs():
                 })
     except Exception as e:
         print(f"Error generating dynamic manifests: {e}")
-    
-    # إذا فشل الجلب لأي سبب، نضع كتالوجات احتياطية لضمان عدم انهيار الإضافة
     if not catalogs:
         catalogs = [
             {"id": "mb_movies_fallback", "type": "movie", "name": "🎬 MovieBox | Movies"},
@@ -72,7 +65,7 @@ def get_dynamic_catalogs():
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # 1. ممر الـ Manifest (يولد الأقسام ديناميكياً عند تثبيت أو قراءة الإضافة)
+        # 1. ممر الـ Manifest
         if self.path in ["/api", "/api/", "/api/manifest.json"]:
             dynamic_manifest = MANIFEST.copy()
             dynamic_manifest["catalogs"] = get_dynamic_catalogs()
@@ -84,41 +77,29 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(dynamic_manifest).encode("utf-8"))
             return
 
-        # 2. ممر جلب داتا الأقسام والبوسترات بشكل ديناميكي (Catalog Handler)
+        # 2. ممر الـ Catalog
         if "/api/catalog/" in self.path:
             clean_path = self.path.replace("/api/catalog/", "").replace(".json", "")
             parts = clean_path.split("/")
-            
             catalog_type = parts[0] if len(parts) > 0 else "movie"
             catalog_id = parts[1] if len(parts) > 1 else ""
             metas = []
-            
             try:
-                # جلب الـ JSON الأصلي من السيرفر
                 resp = requests.get(CATALOG_URL, headers=H5_HEADERS, timeout=10).json()
                 operating_list = resp.get("data", {}).get("operatingList", [])
-                
-                # استخراج رقم الفهرس (Index) من معرف الكتالوج المطلوب
                 target_index = None
                 if "mb_cat_" in catalog_id:
-                    try:
-                        target_index = int(catalog_id.replace("mb_cat_", ""))
-                    except:
-                        target_index = None
-                
-                # جلب القسم المطابق للطلب وعرض محتوياته فوراً
+                    try: target_index = int(catalog_id.replace("mb_cat_", ""))
+                    except: target_index = None
                 for index, section in enumerate(operating_list):
-                    # التحقق: إما يطابق الفهرس المستخرج، أو يطابق النوع كإجراء احتياطي
                     if target_index == index or (target_index is None and catalog_type in str(section.get("title", "")).lower()):
                         subjects = section.get("subjects", [])
                         for sub in subjects:
                             subject_id = sub.get("subjectId")
                             movie_title = sub.get("title")
                             detail_path = sub.get("detailPath", "")
-                            
                             cover_data = sub.get("cover", {}) or {}
                             poster_url = cover_data.get("url", "")
-                            
                             if subject_id and movie_title:
                                 combined_id = f"mb:{subject_id}:{quote(detail_path)}"
                                 metas.append({
@@ -126,9 +107,9 @@ class handler(BaseHTTPRequestHandler):
                                     "type": catalog_type,
                                     "name": movie_title,
                                     "poster": poster_url,
-                                    "description": f"🌟 فيلم/مسلسل متوفر ضمن قسم {section.get('title')}. التقييم العالمي: {sub.get('imdbRatingValue', 'N/A')}"
+                                    "description": f"🌟 متوفر ضمن قسم {section.get('title')}."
                                 })
-                        break # خرج بعد العثور على القسم لضمان سرعة الاستجابة
+                        break
             except Exception as e:
                 print(f"Server Catalog Process Error: {e}")
 
@@ -139,31 +120,24 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"metas": metas}).encode("utf-8"))
             return
 
-        # 3. ممر معالجة البيانات الوصفية الفورية (Meta Handler) - لحل مشكلة الفراغ
+        # 3. ممر الـ Meta
         if "/api/meta/" in self.path:
             clean_path = self.path.replace("/api/meta/", "").replace(".json", "")
             parts = clean_path.split("/")
-            
             media_type = parts[0] if len(parts) > 0 else "movie"
             combined_id = parts[1] if len(parts) > 1 else ""
-            
             meta_result = {"meta": {}}
-            
             if combined_id.startswith("mb:"):
                 id_parts = combined_id.split(":")
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 detail_path = unquote(id_parts[2]) if len(id_parts) > 2 else ""
-                
-                # صياغة عنوان افتراضي نظيف مستخرج من مسار الفيلم للـ Stremio
                 clean_name = detail_path.replace("-", " ").title() if detail_path else "MovieBox Media"
-                
                 meta_result["meta"] = {
                     "id": combined_id,
                     "type": media_type,
                     "name": clean_name,
-                    "description": f"🎬 معرف المادة الداخلي: {subject_id}\n✨ تم توليد البيانات الوصفية وحل مشكلة العرض بنجاح. روابط البث جاهزة ومستقرة بالأسفل!"
+                    "description": f"🎬 معرف المادة الداخلي: {subject_id}"
                 }
-
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -171,11 +145,10 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(meta_result).encode("utf-8"))
             return
 
-        # 4. ممر جلب روابط البث وتشغيل الميديا مباشرة (Stream Handler) - النسخة القناصة المعدلة
+        # 4. ممر الـ Stream (مع حقن دالة الـ Debug التشخيصية)
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
-            
             combined_id = parts[1] if len(parts) >= 2 else ""
             streams_result = {"streams": []}
 
@@ -184,7 +157,6 @@ class handler(BaseHTTPRequestHandler):
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 detail_path = unquote(id_parts[2]) if len(id_parts) > 2 else ""
                 
-                # تم التعديل هنا: استخدام المعامل id بدلاً من subjectId لتجنب المصفوفة الفارغة
                 params = {
                     "id": subject_id,
                     "se": "0",
@@ -194,35 +166,44 @@ class handler(BaseHTTPRequestHandler):
                 }
                 
                 try:
-                    play_resp = requests.get(PLAY_BASE_URL, headers=H5_HEADERS, params=params, timeout=10).json()
+                    play_resp_raw = requests.get(PLAY_BASE_URL, headers=H5_HEADERS, params=params, timeout=10)
+                    play_resp = play_resp_raw.json()
                     play_data = play_resp.get("data", {}) or {}
                     
-                    # أولاً: قنص روابط الـ MP4 المباشرة (360p, 480p, 720p)
                     streams_found = play_data.get("streams", [])
+                    dash_found = play_data.get("dash", [])
+                    
+                    # ===== نظام التشخيص المقترح =====
+                    if not streams_found and not dash_found:
+                        streams_result["debug"] = {
+                            "status_code": play_resp_raw.status_code,
+                            "raw_response": play_resp,
+                            "params_sent": params
+                        }
+                    # ================================
+
                     for s in streams_found:
                         stream_url = s.get("url")
-                        if stream_url:  # نتأكد أن الرابط مفتوح وليس فارغاً (VIP)
+                        if stream_url:
                             res = s.get("resolutions", "Auto")
                             quality_label = f"{res}p" if "p" not in str(res) else res
-                            
                             streams_result["streams"].append({
                                 "name": f"🍿 DexWorld AI\n{quality_label} [Direct]",
-                                "title": f"🎬 جودة {quality_label} بمشغل مباشر وسريع\nترميز: {s.get('codecName', 'h264')}",
+                                "title": f"🎬 جودة {quality_label} بمشغل مباشر وسريع",
                                 "url": stream_url
                             })
-                    
-                    # ثانياً: قنص روابط الـ DASH المتقدمة مجاناً لفك احتكار جودة الـ 1080p العالية
-                    dash_found = play_data.get("dash", [])
+                            
                     for d in dash_found:
                         dash_url = d.get("url")
                         if dash_url:
                             streams_result["streams"].append({
                                 "name": "🍿 DexWorld AI\n1080p [⚡ DASH]",
-                                "title": f"🎬 جودة خارقة مجانية H.265 (HEVC)\n📦 حجم الملف: 2.9 GB تقريباً",
+                                "title": f"🎬 جودة خارقة مجانية H.265 (HEVC)",
                                 "url": dash_url
                             })
                             
                 except Exception as e:
+                    streams_result["debug"] = {"exception": str(e)}
                     print(f"Stream Fetch Error: {e}")
 
             self.send_response(200)
