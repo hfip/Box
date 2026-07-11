@@ -233,11 +233,24 @@ class handler(BaseHTTPRequestHandler):
 
                     # ===== وضع تشخيص مؤقت: احذفه بعد التأكد من نجاح الروابط =====
                     if not streams_found and not dash_found:
+                        server_location = None
+                        try:
+                            geo_resp = requests.get("https://ipapi.co/json/", timeout=5).json()
+                            server_location = {
+                                "ip": geo_resp.get("ip"),
+                                "country": geo_resp.get("country_name"),
+                                "region": geo_resp.get("region"),
+                                "city": geo_resp.get("city")
+                            }
+                        except Exception as geo_e:
+                            server_location = {"error": str(geo_e)}
+
                         streams_result["debug"] = {
                             "token_fetched": bool(fresh_token),
                             "status_code": play_resp_raw.status_code,
                             "raw_response": play_resp,
-                            "params_sent": params
+                            "params_sent": params,
+                            "vercel_server_location": server_location
                         }
                     # ================================================================
 
