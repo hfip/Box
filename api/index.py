@@ -14,13 +14,13 @@ STREAM_BASE_URL = "https://moviebox-cfa7.onrender.com/eyJyZXNvbHV0aW9uIjpbIjEwOD
 
 MANIFEST = {
     "id": "org.abdullah.moviebox.streams",
-    "version": "5.0.0",
+    "version": "5.1.0",
     "name": "MovieBox Premium Streams",
     "description": "مصادر بث سحابية مباشرة وسريعة تدعم جميع الأفلام والمسلسلات العالمية - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
-    "resources": ["stream"],  # تم الاقتصار على مورد البث فقط وحذف الكتالوج والميتا
+    "resources": ["stream"],
     "types": ["movie", "series"],
-    "idPrefixes": ["tt"],  # تتفاعل الإضافة فقط مع الـ IMDb ID العالمي حق أي كتالوج
+    "idPrefixes": ["tt"],
     "behaviorHints": {
         "configurable": False,
         "configurationRequired": False
@@ -38,7 +38,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(MANIFEST).encode("utf-8"))
             return
 
-        # 2. ممر البث المباشر للأفلام والمسلسلات العالمية (Stream Handler)
+        # 2. ممر البث المباشر (Stream Handler) - إصلاح التفكيك للأفلام والمسلسلات
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -48,38 +48,36 @@ class handler(BaseHTTPRequestHandler):
             
             streams_result = {"streams": []}
 
-            # التحقق من أن المعرف هو IMDb العالمي المبدأ بـ tt
             if full_id.startswith("tt"):
                 id_parts = full_id.split(":")
                 imdb_id = id_parts[0]
                 
-                # تفكيك المسار: هل الطلب قادم من حلقة مسلسل (tt00000:season:episode)؟
+                # فحص دقيق: هل هو مسلسل ويحتوي على موسم وحلقة فعلياً؟
                 is_episode = len(id_parts) >= 3 and media_type == "series"
                 
                 if is_episode:
                     season = id_parts[1]
                     episode = id_parts[2]
-                    # صياغة مسار حلقات المسلسلات للسيرفر السحابي المكتشف
                     cloud_request_url = f"{STREAM_BASE_URL}series/{imdb_id}:{season}:{episode}.json"
                 else:
-                    # مسار الأفلام العادي
+                    # للأفلام الصافية أو المعرفات المفردة
                     cloud_request_url = f"{STREAM_BASE_URL}movie/{imdb_id}.json"
                 
                 try:
-                    # طلب الروابط الصافية من المورد السحابي مباشرة
                     cloud_resp = requests.get(cloud_request_url, timeout=10).json()
                     streams_found = cloud_resp.get("streams", [])
                     
                     for s in streams_found:
                         stream_url = s.get("url")
                         if stream_url:
-                            name_tag = s.get("name", "🍿 MovieBox Premium")
-                            title_tag = s.get("title", "🎬 بث فوري سحابي مباشر")
+                            # جلب الأسماء والرموز المحددة من السيرفر الأصلي أو وضع وسوم بريميوم
+                            name_tag = s.get("name") or "🍿 MovieBox Premium"
+                            title_tag = s.get("title") or "🎬 بث فوري سحابي مباشر"
                             
-                            # حقن هيدر التزوير الخارق ExoPlayer لفتح أقصى سرعة للبث وتفادي الحظر
+                            # حقن هيدر ExoPlayer الخارق لفتح أقصى سرعة للبث
                             streams_result["streams"].append({
                                 "name": name_tag,
-                                "title": f"{title_tag}\n⚡ Routed via Cloud @Abdullu.X",
+                                "title": f"{title_tag}\n⚡ Cloud Route by @Abdullu.X",
                                 "url": stream_url,
                                 "behaviorHints": {
                                     "proxyHeaders": {
