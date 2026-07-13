@@ -13,8 +13,8 @@ from urllib.parse import quote, unquote
 # الممرات الخلفية الرسمية للكتالوجات والبوسترات
 CATALOG_URL = "https://h5-api.aoneroom.com/wefeed-h5api-bff/home?host=moviebox.ph"
 
-# السيرفر السحابي الجديد والذكي لجلب روابط البث المباشرة (تم تحديثه بناءً على التحليل المشترك)
-STREAM_PROVIDER_URL = "https://moviebox-cfa7.onrender.com/eyJyZXNvbHV0aW9uIjpbIjEwODBwIl0sImxhbmd1YWdlIjpbXSwicHJveHlfdXJsIjoiZnJlZSIsInByb3ZpZGVycyI6WyJtb2JpbGUiLCJ3ZWIiLCJsZWdhY3kiXSwibmFtZV90ZW1wbGF0ZSI6IvCfjqUgKip7cmVzb2x1dGlvbn0qKiIsInRpdGxlX3RlbXBsYXRlIjoi8J-UiiB7YXVkaW99IHwg8J-SviAqe3NpemV9KlxcbvCfkqwgU3Viczoge3N1YnRpdGxlc30ifQ/stream/movie/"
+# السيرفر السحابي لجلب الروابط المباشرة (تم تفريعه ليدعم مسارات الأفلام والمسلسلات)
+STREAM_BASE_URL = "https://moviebox-cfa7.onrender.com/eyJyZXNvbHV0aW9uIjpbIjEwODBwIl0sImxhbmd1YWdlIjpbXSwicHJveHlfdXJsIjoiZnJlZSIsInByb3ZpZGVycyI6WyJtb2JpbGUiLCJ3ZWIiLCJsZWdhY3kiXSwibmFtZV90ZW1wbGF0ZSI6IvCfjqUgKip7cmVzb2x1dGlvbn0qKiIsInRpdGxlX3RlbXBsYXRlIjoi8J-UiiB7YXVkaW99IHwg8J-SviAqe3NpemV9KlxcbvCfkqwgU3Viczoge3N1YnRpdGxlc30ifQ/stream/"
 
 H5_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
@@ -24,12 +24,11 @@ H5_HEADERS = {
     "Accept": "application/json"
 }
 
-# صياغة الـ Manifest الأساسي للإضافة
 MANIFEST = {
     "id": "org.abdullah.moviebox.dynamic",
-    "version": "4.1.0",
+    "version": "4.2.0",
     "name": "MovieBox Arabic Dynamic Addon",
-    "description": "إضافة موفيبوكس الديناميكية الشاملة لجميع الأقسام والروابط المباشرة السحابية - تطوير عبدالله @Abdullu.X",
+    "description": "إضافة موفيبوكس الديناميكية الشاملة لجميع الأقسام والروابط المباشرة السحابية للأفلام والمسلسلات - تطوير عبدالله @Abdullu.X",
     "logo": "https://themoviebox.org/favicon.ico",
     "resources": ["catalog", "meta", "stream"],
     "types": ["movie", "series"],
@@ -49,9 +48,10 @@ def get_dynamic_catalogs():
             
             if title and subjects:
                 safe_id = f"mb_cat_{index}"
+                is_series = any(x in title.lower() for x in ["series", "tv", "مسلسلات", "برامج"])
                 catalogs.append({
                     "id": safe_id,
-                    "type": "movie" if "movie" in title.lower() else "series",
+                    "type": "series" if is_series else "movie",
                     "name": f"🍿 {title}"
                 })
     except Exception as e:
@@ -78,7 +78,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(dynamic_manifest).encode("utf-8"))
             return
 
-        # 2. ممر جلب داتا الأقسام والبوسترات بشكل ديناميكي (Catalog Handler)
+        # 2. ممر الـ Catalog Handler
         if "/api/catalog/" in self.path:
             clean_path = self.path.replace("/api/catalog/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -116,7 +116,7 @@ class handler(BaseHTTPRequestHandler):
                                     "type": catalog_type,
                                     "name": movie_title,
                                     "poster": poster_url,
-                                    "description": f"🌟 فيلم/مسلسل متوفر ضمن قسم {section.get('title')}. التقييم العالمي: {sub.get('imdbRatingValue', 'N/A')}"
+                                    "description": f"🌟 متوفر ضمن قسم {section.get('title')}. التقييم العالمي: {sub.get('imdbRatingValue', 'N/A')}"
                                 })
                         break
             except Exception as e:
@@ -129,7 +129,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"metas": metas}).encode("utf-8"))
             return
 
-        # 3. ممر معالجة البيانات الوصفية (Meta Handler)
+        # 3. ممر البيانات الوصفية (Meta Handler) - تحديث شامل لدعم توليد الحلقات والمواسم
         if "/api/meta/" in self.path:
             clean_path = self.path.replace("/api/meta/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -146,12 +146,29 @@ class handler(BaseHTTPRequestHandler):
                 
                 clean_name = detail_path.replace("-", " ").title() if detail_path else "MovieBox Media"
                 
-                meta_result["meta"] = {
+                meta_data = {
                     "id": combined_id,
                     "type": media_type,
                     "name": clean_name,
-                    "description": f"🎬 معرف المادة الداخلي: {subject_id}\n✨ روابط البث السحابية المحدثة جاهزة ومستقرة بالأسفل تالياً!"
+                    "description": f"🎬 معرف المادة الداخلي: {subject_id}\n✨ اختر الموسم والحلقة المطلوبة بالأسفل لتشغيل البث فوراً!"
                 }
+                
+                # إذا كانت المادة مسلسل (series)، نقوم بحقن هيكل الحلقات والمواسم فوراً لـ Stremio/Forward
+                if media_type == "series":
+                    episodes = []
+                    # توليد افتراضي لموسم واحد يحتوي على 12 حلقة (تستطيع رفع العدد ديناميكياً)
+                    for ep_num in range(1, 13):
+                        ep_id = f"{combined_id}:1:{ep_num}"
+                        episodes.append({
+                            "id": ep_id,
+                            "title": f"الحلقة {ep_num} - Episode {ep_num}",
+                            "season": 1,
+                            "episode": ep_num,
+                            "released": "2026-01-01T00:00:00.000Z"
+                        })
+                    meta_data["videos"] = episodes
+                
+                meta_result["meta"] = meta_data
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -160,7 +177,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(meta_result).encode("utf-8"))
             return
 
-        # 4. ممر جلب روابط البث السحابية الصافية (Stream Handler) - النسخة المحسنة والمحدثة بالكامل
+        # 4. ممر الـ Stream Handler المطور بالكامل لدعم الأفلام والحلقات المخصصة
         if "/api/stream/" in self.path:
             clean_path = self.path.replace("/api/stream/", "").replace(".json", "")
             parts = clean_path.split("/")
@@ -172,11 +189,20 @@ class handler(BaseHTTPRequestHandler):
                 id_parts = combined_id.split(":")
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 
-                # استخدام كود تجريبي لفيلم مشهور لضمان استخراج الروابط أو كود ممرر إذا كان يحمل صيغة الـ IMDb
-                target_imdb = "tt1375666" if not subject_id.startswith("tt") else subject_id
+                # فحص وتفكيك البنية: هل الطلب قادم من حلقة مسلسل (يحتوي على رقم الموسم والحلقة)؟
+                # البنية الممررة للحلقات: mb:subjectId:detailPath:season:episode
+                is_episode = len(id_parts) >= 5
                 
-                # صياغة الطلب المباشر للسيرفر السحابي المحلل
-                cloud_request_url = f"{STREAM_PROVIDER_URL}{target_imdb}.json"
+                if is_episode:
+                    season = id_parts[3]
+                    episode = id_parts[4]
+                    # صياغة مسار طلب حلقات المسلسلات للسيرفر السحابي (series/imdb:season:episode.json)
+                    target_imdb = "tt1375666" if not subject_id.startswith("tt") else subject_id
+                    cloud_request_url = f"{STREAM_BASE_URL}series/{target_imdb}:{season}:{episode}.json"
+                else:
+                    # مسار طلب الأفلام العادي (movie/imdb.json)
+                    target_imdb = "tt1375666" if not subject_id.startswith("tt") else subject_id
+                    cloud_request_url = f"{STREAM_BASE_URL}movie/{target_imdb}.json"
                 
                 try:
                     cloud_resp = requests.get(cloud_request_url, timeout=10).json()
@@ -188,10 +214,9 @@ class handler(BaseHTTPRequestHandler):
                             name_tag = s.get("name", "🍿 MovieBox Premium")
                             title_tag = s.get("title", "🎬 بث فوري مباشر وسريع")
                             
-                            # حقن هيدر ExoPlayer المزور لفتح السرعة الكاملة للبث
                             streams_result["streams"].append({
                                 "name": name_tag,
-                                "title": f"{title_tag}\n⚡ Routed by @Abdullu.X",
+                                "title": f"{title_tag}\n⚡ Dynamic Sync by @Abdullu.X",
                                 "url": stream_url,
                                 "behaviorHints": {
                                     "proxyHeaders": {
