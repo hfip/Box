@@ -110,7 +110,6 @@ class handler(BaseHTTPRequestHandler):
                             poster_url = cover_data.get("url", "")
                             
                             if subject_id and movie_title:
-                                # نقوم بحفظ الـ subjectId لكي نستخدمه في جلب البث السحابي لاحقاً
                                 combined_id = f"mb:{subject_id}:{quote(detail_path)}"
                                 metas.append({
                                     "id": combined_id,
@@ -173,15 +172,13 @@ class handler(BaseHTTPRequestHandler):
                 id_parts = combined_id.split(":")
                 subject_id = id_parts[1] if len(id_parts) > 1 else ""
                 
-                # نستخدم كود الفيلم التجريبي الثابت tt1375666 كمثال أو كود ممرر حقيقي لفك الحظر
-                # ملاحظة: إذا كان تطبيق فورد يمرر كود الـ IMDb مباشرة، يمكنك استبداله بـ subject_id
+                # استخدام كود تجريبي لفيلم مشهور لضمان استخراج الروابط أو كود ممرر إذا كان يحمل صيغة الـ IMDb
                 target_imdb = "tt1375666" if not subject_id.startswith("tt") else subject_id
                 
-                # صياغة الطلب المباشر للسيرفر السحابي الذي حللناه في سفاري
+                # صياغة الطلب المباشر للسيرفر السحابي المحلل
                 cloud_request_url = f"{STREAM_PROVIDER_URL}{target_imdb}.json"
                 
                 try:
-                    # نرسل طلب نظيف لقراءة الـ CDN والروابط المباشرة المفتوحة
                     cloud_resp = requests.get(cloud_request_url, timeout=10).json()
                     streams_found = cloud_resp.get("streams", [])
                     
@@ -191,7 +188,7 @@ class handler(BaseHTTPRequestHandler):
                             name_tag = s.get("name", "🍿 MovieBox Premium")
                             title_tag = s.get("title", "🎬 بث فوري مباشر وسريع")
                             
-                            # نقوم بحقن تزوير الهوية (User-Agent) الخاص بـ ExoPlayer كما كشفناه بالتحليل لضمان أعلى سرعة
+                            # حقن هيدر ExoPlayer المزور لفتح السرعة الكاملة للبث
                             streams_result["streams"].append({
                                 "name": name_tag,
                                 "title": f"{title_tag}\n⚡ Routed by @Abdullu.X",
